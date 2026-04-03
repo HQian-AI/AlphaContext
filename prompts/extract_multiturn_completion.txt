@@ -1,0 +1,40 @@
+You are a thorough and diligent conversation analyzer specializing in creative dialogue. Your task is to extract the final and complete version of creative results (such as ideas, descriptive details, expression styles, or creative approaches) generated during a multiturn conversation between a player and an LLM, where the core goal is to evaluate and enhance user's creativity. The extracted content should reflect the key creative components, iterative changes, and final creative directions formed through interaction.  
+
+You will be provided with the conversation:  
+
+<|The Start of The Conversation|>  
+{chat_history}  
+<|The End of The Conversation|>  
+
+Instructions for Extraction:  
+
+1. Identify Key Creative Components: Review the entire conversation to identify the most critical creative parts, which may include:  
+   - Specific descriptive details, comparisons, or symbolic references proposed by the LLM or player (e.g., "shadows that glow" as a unique comparison).  
+   - Adjustments to how ideas are expressed over time (e.g., shifting from a "serious" tone to a "playful" tone based on feedback).  
+   - Agreed-upon creative structures or focus areas (e.g., "using small daily moments to show what freedom feels like").  
+
+2. Integrate Creative Changes Over Time: If there are tweaks, expansions, or shifts to creative ideas during the conversation (e.g., the LLM suggests a comparison, the player adjusts it, and the LLM refines it further), include these step-by-step changes in the final extraction. Highlight how core ideas developed, not just the end result. For example, if the conversation starts with "describing loneliness as 'empty rooms'" and evolves into "loneliness as 'a cup left half-drunk,'" the extraction should include both the first idea and the polished version to show how creativity grew.  
+
+3. Focus on How Creative Ideas Connect:  
+   - For creative ideas: Make sure the extracted content captures the main theme, key descriptive details, and style choices that emerged through interaction—not just isolated sentences.  
+   - For creative guidance: Extract the LLM’s key suggestions that helped spark creativity (e.g., "try mixing playful and serious details") and how the player used those suggestions, showing the back-and-forth creative process.  
+
+
+You should output a JSON object with two entries:  
+- "thought" (str): Output your thought process when extracting the final content.  
+  1. How did the LLM’s creative prompts and the player’s feedback shape the key creative parts?  
+  2. How did you identify and include changes to descriptive details, style, or ideas as the conversation progressed?  
+  3. How did you make sure the extracted content shows the collaborative nature of the creative interaction (not just one side’s ideas)?  
+- "final_completion" (str): The final and complete summary of creative components, changes over time, and main directions extracted from the conversation.  
+
+
+Note:  
+1. If there are multiple lines, you should use triple quotes (""") to wrap the content. For example, "final_completion": """Key descriptive detail: 'shadows that glow' (evolved from initial 'dark shadows');  
+   Style focus: Playful tone with serious details mixed in;  
+   Key creative prompt: 'Try adding senses beyond sight, like sound or touch'."""  
+2. In the "final_completion" entry, replace all double quotes (") with single quotes (') to prevent JSON formatting issues. For example, output "final_completion": "Key comparison: 'freedom as a bird that chooses to stay' (refined from 'free bird')."  
+
+
+{extraction_requirement}  
+
+Take a deep breath and carefully follow the instructions and guidelines to capture the essence of creative interaction.  
