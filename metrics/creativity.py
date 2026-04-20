@@ -1,4 +1,3 @@
-
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -148,12 +147,17 @@ class GrowthCreativityMetric(BaseMetric):
         self.retry_after = retry_after
         # Prefer DeepSeek hosted model if configured in model_config to avoid Anthropic API key dependency.
         try:
-            from model_config import API_BASE_deepseek
-            default_model = "hosted_vllm/DeepSeek-V3.1"
+            from model_config import (
+                API_BASE_deepseek,
+                API_KEY_deepseek,
+                LITELLM_MODEL_NAME_deepseek,
+            )
+            default_model = LITELLM_MODEL_NAME_deepseek
             self.llm_kwargs: Dict[str, Any] = {
                 "temperature": 0.0,
                 "model": default_model,
                 "api_base": API_BASE_deepseek,
+                "api_key": API_KEY_deepseek,
                 **llm_kwargs,
             }
         except Exception:
@@ -173,6 +177,7 @@ class GrowthCreativityMetric(BaseMetric):
                     messages=[{"role": "user", "content": prompt}],
                     num_retries=1
                 ).choices[0].message.content
+                logger.info(f"[CreativityMetric] LLM response received (retry {i+1})")
             except Exception as e:
                 import time
                 time.sleep(self.retry_after)
@@ -196,6 +201,7 @@ class GrowthCreativityMetric(BaseMetric):
                 else:
                     logger.debug("Parsed response has no 'creativity' key; full_response=%s", full_response)
 
+        logger.warning(f"Failed to get valid creativity score after {self.num_retries} retries")
         return None
 
     def score(
@@ -220,4 +226,8 @@ class GrowthCreativityMetric(BaseMetric):
         # if first_score is None or last_score is None:
         #     return 0.0
 
-        return first_score/5
+        if first_score is None:
+            logger.warning("Failed to get creativity score from LLM, returning 0.0")
+            return 0.0
+        
+        return first_score / 5

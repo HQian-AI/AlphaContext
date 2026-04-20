@@ -2,7 +2,6 @@ import os
 import json
 import re
 import requests
-import time
 from typing import Optional
 from pathlib import Path
 import ast
@@ -14,14 +13,22 @@ from modules.htp_outline import generate_outline
 from modules.map_elites_context import run_map_elites
 import concurrent.futures
 from glob import glob
-from model_config import MODEL_NAME_deepseek, API_BASE_deepseek, CHAT_EP_deepseek
+import metrics.creativity
+from modules.simulator.src.reward import multiturn_aware_reward 
+from model_config import (
+    MODEL_NAME_deepseek,
+    LITELLM_MODEL_NAME_deepseek,
+    API_BASE_deepseek,
+    CHAT_EP_deepseek,
+    API_KEY_deepseek,
+    get_deepseek_headers,
+)
 
 try:
     nlp = spacy.load("en_core_web_sm")
 except Exception:
     try:
         from spacy.cli import download as spacy_download
-
         print("spaCy model en_core_web_sm not found, attempting to download...")
         spacy_download("en_core_web_sm")
         nlp = spacy.load("en_core_web_sm")
@@ -39,17 +46,14 @@ def extract_json_from_piece(piece_str: str):
     if not match:
         raise ValueError("No JSON found in piece field")
     raw = match.group().strip()
-
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
         pass
-
     try:
         return ast.literal_eval(raw)
     except Exception:
         pass
-
     fixed = re.sub(
         r"(\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*):",
         r'\1"\2"\3:',
@@ -99,7 +103,6 @@ def convert_to_collab_format(input_file, output_file):
     with open(input_file, "r", encoding="utf-8") as f:
         data = json.load(f)
         contexts = data.get("contexts", data.get("contexts", [])) if isinstance(data, dict) else data
-
     output_data = []
     for i, context in enumerate(contexts, 1):
         raw_text = ""
@@ -107,7 +110,6 @@ def convert_to_collab_format(input_file, output_file):
             raw_text = (context.get("text") or context.get("raw_context_text") or "").strip()
         else:
             raw_text = str(context).strip()
-
         if raw_text:
             output_data.append({
                 "title": (context.get("title") if isinstance(context, dict) else "") or f"Context {i}",
@@ -120,7 +122,6 @@ def convert_to_collab_format(input_file, output_file):
         Characters_and_Interaction = context.get("Characters & Interaction", []) if isinstance(context, dict) else []
         Conflict_and_Challenge = context.get("Conflict & Challenge", "") if isinstance(context, dict) else ""
         Open_Task = context.get("Open Task", "") if isinstance(context, dict) else ""
-
         characters_lines = []
         if isinstance(Characters_and_Interaction, list):
             for ch in Characters_and_Interaction:
@@ -152,20 +153,15 @@ def convert_to_collab_format(input_file, output_file):
 
 def score_contexts_with_multiple_personas(context_file, base_personalities=None, per_persona_count=10,
                                           output_subdir="outputs/multiturn_data_personas"):
-    from modules.simulator.src.reward import multiturn_aware_reward
-
     if base_personalities is None:
         base_personalities = ['quiet', 'talkative', 'default']
-
     personas = []
     for base in base_personalities:
         for i in range(1, int(per_persona_count) + 1):
             personas.append(f"{base}_{i}")
 
     print(f" Scoring with {len(personas)} virtual personas")
-
     os.makedirs(output_subdir, exist_ok=True)
-
     assess_context = os.path.join("outputs", "creativity", "assess_context.json")
     os.makedirs(os.path.dirname(assess_context), exist_ok=True)
     convert_to_collab_format(context_file, assess_context)
@@ -174,8 +170,9 @@ def score_contexts_with_multiple_personas(context_file, base_personalities=None,
         collab_data = json.load(f)
 
     model_kwargs = {
-        "model": "hosted_vllm/DeepSeek-V3.1",
+        "model": LITELLM_MODEL_NAME_deepseek,
         "api_base": API_BASE_deepseek,
+        "api_key": API_KEY_deepseek,
         "model_cost": {
             "input_cost_per_token": 0,
             "output_cost_per_token": 0,
@@ -183,7 +180,6 @@ def score_contexts_with_multiple_personas(context_file, base_personalities=None,
             "max_output_tokens": 8192,
         }
     }
-
     all_persona_scores = []
 
     def _score_sample_for_persona(persona_name: str, item: dict):
@@ -191,10 +187,7 @@ def score_contexts_with_multiple_personas(context_file, base_personalities=None,
             base_personality = persona_name.rsplit('_', 1)[0]
             user_gen_kwargs = dict(model_kwargs)
             user_gen_kwargs["prompt_variant"] = base_personality
-
-            title = item.get("title", "Untitled")
             text = item.get("text", "")
-
             reward_dict = multiturn_aware_reward(
                 task_desc="Evaluate the creativity of the context.",
                 single_turn_prompt=text,
@@ -214,7 +207,10 @@ def score_contexts_with_multiple_personas(context_file, base_personalities=None,
             creativity_vals = reward_dict.get("creativity", [0.0])
             creativity_score = sum(creativity_vals) / len(creativity_vals) if creativity_vals else 0.0
             return creativity_score
-        except Exception:
+        except Exception as e:
+            import traceback
+            print(f"[ERROR] _score_sample_for_persona failed for {persona_name}: {e}")
+            traceback.print_exc()
             return 0.0
 
     def _score_persona(persona_name: str):
@@ -274,7 +270,6 @@ def score_contexts_with_multiple_personas(context_file, base_personalities=None,
         all_scores.extend(ps["scores"])
     grand_avg = sum(all_scores) / len(all_scores) if all_scores else 0.0
     print(f"\n Grand average creativity score (across {len(personas)} personas): {grand_avg:.4f}")
-
     return {
         "grand_average": grand_avg,
         "per_item_average": per_item_avg,
@@ -287,13 +282,11 @@ def score_contexts_with_multiple_personas(context_file, base_personalities=None,
 # score_contexts
 # -------------------------
 def score_contexts(context_file):
-    output_subdir = "outputs/multiturn_data"
-    output_dir = output_subdir
+    output_dir = "outputs/multiturn_data"
     os.makedirs(output_dir, exist_ok=True)
     assess_context = os.path.join("outputs", "creativity", "assess_context.json")
     os.makedirs(os.path.dirname(assess_context), exist_ok=True)
     convert_to_collab_format(context_file, assess_context)
-
     print(" Running scoring with 30 virtual personas ")
     multi_persona_result = score_contexts_with_multiple_personas(
         context_file=context_file,
@@ -301,7 +294,6 @@ def score_contexts(context_file):
         per_persona_count=10,
         output_subdir=output_dir
     )
-
     output_path = os.path.join(output_dir, "final_creative_scores.json")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
@@ -310,7 +302,6 @@ def score_contexts(context_file):
     print(f" Saved multi-persona scoring results to: {output_path}")
     per_item_scores = multi_persona_result.get("per_item_average") or []
     fallback_score = float(multi_persona_result.get("grand_average", 0.0))
-
     combined = []
     try:
         with open(context_file, "r", encoding="utf-8") as f:
@@ -321,7 +312,6 @@ def score_contexts(context_file):
                 orig_list = orig_data
     except Exception:
         orig_list = []
-
     for i, orig in enumerate(orig_list):
         s = dict(orig) if isinstance(orig, dict) else {"text": str(orig)}
         sc = per_item_scores[i] if i < len(per_item_scores) else fallback_score
@@ -332,7 +322,6 @@ def score_contexts(context_file):
         s["score"] = sc
         s["Score"] = sc
         combined.append(s)
-        
     try:
         _scores = [c.get("score", 0.0) for c in combined]
         print(f"DEBUG per-item score range: {min(_scores):.4f} -> {max(_scores):.4f}")
@@ -346,7 +335,6 @@ def get_average_score(scored_data):
     contexts = scored_data.get("contexts", scored_data.get("contexts", []))
     scores = [s.get("score", 0) for s in contexts]
     return sum(scores) / len(scores) if scores else 0
-
 
 def assemble_full_context(context: dict, model_kwargs: Optional[dict] = None) -> str:
     Anchor = context.get("Anchor", "")
@@ -384,12 +372,9 @@ def assemble_full_context(context: dict, model_kwargs: Optional[dict] = None) ->
         ("Characters & Interaction", chars_text),
         ("Conflict & Challenge", Conflict_and_Challenge),
     ]
-
-    # Check if all narrative blocks are empty
     if not any(b[1] and str(b[1]).strip() for b in narrative_blocks) and not (Open_Task and str(Open_Task).strip()):
         if context.get("text"):
             return str(context.get("text"))
-
     prompt_parts = [
         "You are tasked with connecting these context segments by adding transition sentences between them.",
         "Rules:",
@@ -404,14 +389,12 @@ def assemble_full_context(context: dict, model_kwargs: Optional[dict] = None) ->
         "The city's lights flickered in the rain. Through one of those rain-streaked windows, in a downtown office that never slept, Sarah typed frantically at her computer.",
         "\nNow, add similar transitions between these context segments while keeping their original content intact:\n"
     ]
-
     narrative_text = []
     for name, content in narrative_blocks:
         if content and str(content).strip():
             narrative_text.append(f"### {name} ###\n{content}")
 
     prompt = "\n".join(prompt_parts + narrative_text)
-
     stitched = None
     try:
         stitched = _call_local_model_raw(prompt, model_kwargs=model_kwargs, timeout=120)
@@ -432,14 +415,17 @@ def assemble_full_context(context: dict, model_kwargs: Optional[dict] = None) ->
 
 
 def _call_local_model_raw(prompt: str, model_kwargs: dict, timeout: int = 120) -> Optional[str]:
-    api_base = model_kwargs.get("api_base")
+    api_url = model_kwargs.get("api_url") or model_kwargs.get("api_base")
     model_name = model_kwargs.get("model")
 
-    if not api_base or not model_name:
+    if not api_url or not model_name:
         print("_call_local_model_raw: api_base or model name not found in model_kwargs.")
         return None
 
-    headers = {"Content-Type": "application/json"}
+    if not api_url.rstrip("/").endswith(("/chat/completions", "/completions")):
+        api_url = api_url.rstrip("/") + "/chat/completions"
+
+    headers = get_deepseek_headers(model_kwargs.get("api_key"))
 
     payload = {
         "model": model_name,
@@ -451,7 +437,7 @@ def _call_local_model_raw(prompt: str, model_kwargs: dict, timeout: int = 120) -
     }
 
     try:
-        response = requests.post(api_base, headers=headers, json=payload, timeout=timeout)
+        response = requests.post(api_url, headers=headers, json=payload, timeout=timeout)
         response.raise_for_status()
         data = response.json()
 
@@ -486,7 +472,6 @@ def produce_final_context(scored_path: str, idx: int, input_title: Optional[str]
         print(" No context data available")
         return None
 
-
     def score_of(s):
         return float(s.get("score", s.get("Score", 0.0)))
 
@@ -495,7 +480,6 @@ def produce_final_context(scored_path: str, idx: int, input_title: Optional[str]
 
     final_text = best.get("text", "")
     
-
     if not final_text.strip():
         final_text = best.get("raw_context_text", "")
 
@@ -516,7 +500,7 @@ def produce_final_context(scored_path: str, idx: int, input_title: Optional[str]
 
     print(f" Final context saved: {json_path}")
     return final_text
-def save_all_final_contexts(contexts, titles, model_kwargs=None, output_path="outputs/final_contexts/final_contexts_all.json"):
+def save_all_final_contexts(output_path="outputs/final_contexts/final_contexts_all.json"):
     ctx_files = glob("outputs/final_context_*.json")
 
     def extract_idx(path):
@@ -551,7 +535,6 @@ def save_all_final_contexts(contexts, titles, model_kwargs=None, output_path="ou
 
 
 def main_loop():
-    start_time = time.time()
     default_input = "input/test_dataset.json"
 
     if not os.path.exists(default_input):
@@ -564,9 +547,6 @@ def main_loop():
     with open(default_input, "r", encoding="utf-8") as f:
         query_data_list = json.load(f)
 
-    all_titles = [qd.get("title", f"Context {i + 1}") for i, qd in enumerate(query_data_list)]
-    all_contexts = []
-
     start_idx = 1
 
     for idx, query_data in enumerate(tqdm(query_data_list, desc="Generating creative contexts"), start=1):
@@ -577,14 +557,12 @@ def main_loop():
         avg_score = 0
         generation = 1
         input_file = None
-        raw_context = ""  
         # 1. Outline Generation
         if generate_outline is None:
             print(f"\n Topic {idx}: Outline generation module not imported, using raw data")
-            outline_result = query_data
         else:
             print(f"\n Topic {idx}: Generating outline (Title: {query_data.get('title')})")
-            outline_result = generate_outline(query_data, idx)
+            generate_outline(query_data, idx)
 
         # 2. MCTS Context Generation
         if generate_MCTSContext is None:
@@ -631,7 +609,6 @@ def main_loop():
             # Read parent contexts
             with open(input_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                parents = data.get("contexts", [])
 
             map_output_dir = Path("outputs/map_elites_text_model_run")
             map_output_dir.mkdir(parents=True, exist_ok=True)
@@ -658,7 +635,7 @@ def main_loop():
                         init_steps=2,
                         grid_x=3, grid_y=3, grid_z=3,
                         api_url=CHAT_EP_deepseek,
-                        api_key=None,
+                        api_key=API_KEY_deepseek,
                         model=MODEL_NAME_deepseek,
                         verbose=True,
                         idx=idx,
@@ -754,6 +731,7 @@ def main_loop():
         local_model_kwargs = {
             "model": MODEL_NAME_deepseek,
             "api_base": API_BASE_deepseek,
+            "api_key": API_KEY_deepseek,
             "model_cost": {
                 "input_cost_per_token": 0,
                 "output_cost_per_token": 0,
@@ -765,16 +743,9 @@ def main_loop():
 
     # Merge and save all contexts
     try:
-        save_all_final_contexts(all_contexts, all_titles, model_kwargs=local_model_kwargs)
+        save_all_final_contexts()
     except Exception as e:
         print(f" Failed to merge and save all contexts: {e}")
-
-    # Calculate total runtime
-    end_time = time.time()
-    total_seconds = end_time - start_time
-    total_minutes = total_seconds / 60
-    print(f"\n=== Run Completed ===")
-    print(f"Total runtime: {total_minutes:.2f} minutes ({total_seconds:.1f} seconds)")
 
 
 if __name__ == "__main__":

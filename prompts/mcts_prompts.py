@@ -14,11 +14,11 @@ PART_TEMPLATES: Dict[str, Dict[str, Any]] = {
             "  - Ensure that readers can understand a clear scene, action, or state just by reading the sentence alone."
             "\nExample Output: [\"In 2045, as climate change continued to worsen, the ‘Green Haven’ city in the western region became one of the last places humans could still live.\"]"
         ),
-        "max_chars": 1000,
+        "max_chars": 1024,
         "min_chars": 100,
         "candidates": 2,
         "target_sentences": 3,
-        "max_tokens": 1000,
+        "max_tokens": 1024,
         "temperature": 0.6,
     },
     "Scene Setting": {
@@ -35,11 +35,11 @@ PART_TEMPLATES: Dict[str, Dict[str, Any]] = {
             "  - Ensure that readers can understand a clear scene, action, or state just by reading the sentence alone."
             "\nExample Output: [\"On Saturday morning, Li Na received an urgent notice about an emergency remote meeting.\"]"
         ),
-        "max_chars": 2000,
+        "max_chars": 2048,
         "min_chars": 200,
         "candidates": 2,
-        "target_sentences": 6,
-        "max_tokens": 2000,
+        "target_sentences": 5,
+        "max_tokens": 2048,
         "temperature": 0.7,
     },
     "Characters & Interaction": {
@@ -53,11 +53,11 @@ PART_TEMPLATES: Dict[str, Dict[str, Any]] = {
             "  - Each element in the array must be a complete sentence; do not use placeholders.\n"
             "\nExample Output: [\"A young resident asked, ‘Why is our food quota 20% less than last year?’\"]"
         ),
-        "max_chars": 1000,
+        "max_chars": 1024,
         "min_chars": 260,
         "candidates": 2,
-        "target_sentences": 9,
-        "max_tokens": 2000,
+        "target_sentences": 7,
+        "max_tokens": 2048,
         "temperature": 0.75,
     },
     "Conflict & Challenge": {
@@ -71,11 +71,11 @@ PART_TEMPLATES: Dict[str, Dict[str, Any]] = {
             "  - Each element in the array must be a complete sentence; do not use placeholders.\n"
             "\nExample Output: [\"‘How long can we keep this up without breaking someone?’ Maria asked, staring at the ration ledger.\" ]"
         ),
-        "max_chars": 350,
+        "max_chars": 1024,
         "min_chars": 300,
         "candidates": 2,
-        "target_sentences": 8,
-        "max_tokens": 2000,
+        "target_sentences": 6,
+        "max_tokens": 2048,
         "temperature": 0.7,
     },
     "Open Task": {
